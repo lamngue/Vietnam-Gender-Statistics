@@ -86,7 +86,7 @@ The data for birth ratio by region comes from the General statistics office of V
 ```{r}
 url <- "https://github.com/lamngue/Vietnam-Gender-Statistics/blob/8fb36b392374a9bd16933fd8903de84d346102e3/Sex%20ratio%20at%20Birth%20by%20Region.xlsx?raw=true"
 destfile <- "dataset_birth_ratio.xlsx"
-download.file(url, destfile)
+download.file(url, destfile, mode = 'wb')
 birthDataByRegion <- read_excel(destfile)
 birthDataByRegion <- birthDataByRegion[-c(1),]
 birthDataByRegion <- slice(birthDataByRegion, -c(1))
@@ -211,7 +211,9 @@ vn_spatial_region <- vn_spatial_region %>% mutate(Name = (case_when(Name == "Da 
 To display the map, we first get the geo-location of the provinces.
 </h5>
 ```{r}
-vietnam_prov <- getData("GADM", country = "Vietnam", level = 1)
+u <- "https://geodata.ucdavis.edu/gadm/gadm3.6/Rsp/gadm36_VNM_1_sp.rds"
+download.file(u, "vnm_geospatial.rds", mode = "wb")
+vietnam_prov <- readRDS("vnm_geospatial.rds")
 vietnam_prov_df <- vietnam_prov %>% fortify(region = "NAME_1")
 vietnam_prov_df %>% 
   mutate(prov_names = stri_trans_general(id, "Latin-ASCII")) -> vietnam_prov_df
@@ -311,7 +313,7 @@ ui = fluidPage(
 #Processing data
 url <- "https://github.com/lamngue/Vietnam-Gender-Statistics/blob/a54c9d3f956f395c41de65f741a118933e673bde/Unemployment%20rate%20by%20Region.xlsx?raw=true"
 destfile <- "dataset_birth_ratio.xlsx"
-download.file(url, destfile)
+download.file(url, destfile, mode="wb")
 unemployment_data_by_region <- read_excel(destfile)
 unemployment_data_by_region  <- unemployment_data_by_region[-c(1,2,3),]
 unemployment_data_by_region <- unemployment_data_by_region %>% dplyr::rename("Year" = "Unemployment and underemployment rate of labour force at working age by region and by sex by Year, Region, Rate and Sex", Region = "...2", "Unemployment" = "...3")
@@ -334,7 +336,7 @@ In this analysis, I will look into the percentage of university graduates in six
 #Processing data
 url <- "https://github.com/lamngue/Vietnam-Gender-Statistics/blob/097d197fda3ae60e421350ad9495203a17addf7b/Percentage%20Of%20High%20school%20graduates.xlsx?raw=true"
 destfile <- "dataset_high_school_graduate.xlsx"
-download.file(url, destfile)
+download.file(url, destfile, mode="wb")
 university_grad_data_by_region <- read_excel(destfile)
 university_grad_data_by_region[2, 1] <- "Region"
 names(university_grad_data_by_region) <- university_grad_data_by_region[2,]
@@ -361,7 +363,7 @@ The distribution reveals that Red River Delta, Northern midlands and mountain ar
 #Processing data
 url <- "https://github.com/lamngue/Vietnam-Gender-Statistics/blob/3c80f45d1d7a46106fa4c01a595fd1338ada5c5f/Percentage%20of%20Literate%20Population.xlsx?raw=true"
 destfile <- "dataset_literacy.xlsx"
-download.file(url, destfile)
+download.file(url, destfile, mode="wb")
 literacy_data_by_region <- read_excel(destfile)
 literacy_data_by_region[2, 1] <- "Region"
 names(literacy_data_by_region) <- literacy_data_by_region[2,]
@@ -390,7 +392,7 @@ Lastly, we will look at the fertility rates for the six regions.
 #Processing data
 url <- "https://github.com/lamngue/Vietnam-Gender-Statistics/blob/1d727a73b7ab8064b8564d97a46d91d498bb5e54/Fertility%20rate.xlsx?raw=true"
 destfile <- "dataset_fertility.xlsx"
-download.file(url, destfile)
+download.file(url, destfile, mode="wb")
 fertility_data_by_region <- read_excel(destfile)
 fertility_data_by_region[2, 1] <- "Region"
 names(fertility_data_by_region) <- fertility_data_by_region[2,]
@@ -414,7 +416,7 @@ ggplot(data = fertility_data_by_region, aes(x = Region, y = `Fertility Rate`, gr
 ```{r echo=FALSE, fig.align = 'center'}
 url <- "https://github.com/lamngue/Vietnam-Gender-Statistics/blob/main/Infant%20mortality%20Rate%20by%20Region.xlsx?raw=true"
 destfile <- "dataset_infant_mortality.xlsx"
-download.file(url, destfile)
+download.file(url, destfile, mode="wb")
 infant_mortality_data_by_region <- read_excel(destfile)
 infant_mortality_data_by_region[2, 1] <- "Region"
 names(infant_mortality_data_by_region) <- infant_mortality_data_by_region[2,]

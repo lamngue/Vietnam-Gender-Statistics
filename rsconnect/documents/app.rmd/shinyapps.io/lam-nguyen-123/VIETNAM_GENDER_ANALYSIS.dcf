@@ -1,0 +1,13 @@
+name: VIETNAM_GENDER_ANALYSIS
+title: VIETNAM_GENDER_ANALYSIS
+username:
+account: lam-nguyen-123
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 6560808
+bundleId: 7086357
+url: https://lam-nguyen-123.shinyapps.io/Vietnam_Gender_Analysis/
+when: 1681413466.74566
+lastSyncTime: 1681413466.74569
+asMultiple: FALSE
+asStatic: FALSE
