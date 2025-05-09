@@ -20,6 +20,7 @@ library(raster)
 library(shinythemes)
 library(caret)
 library(readxl)
+library(geodata)
 library(tidyverse)
 library(rvest)
 library(ggplot2)
@@ -32,6 +33,7 @@ library(viridis)
 library(XML)
 library(glmnet)
 library(corrplot)
+library(MLmetrics)
 library(reshape2)
 library(randomForest)
 library(glue)
@@ -80,19 +82,32 @@ The data sets will be extracted from the official sites such as UNICEF and the G
 ## Data Preprocessing
 
 <h5>
-The data for birth ratio by region comes from the General statistics office of Vietnam, the dataset is uploaded to Github, then retrieved via downloading. The first empty row was removed, extracting headers and data, and naming it "birthDataByRegion". We then rename the headers to make it displays the year of retrieval.\
+The data for birth ratio by region and sex ratio by province comes from the General statistics office of Vietnam, the dataset is uploaded to Github, then retrieved via downloading. The first empty row was removed, extracting headers and data, and naming it "birthDataByRegion" and "sexRatioByProvince". We then rename the headers to make it displays the year of retrieval.
 </h5>
 
 ```{r}
 url <- "https://github.com/lamngue/Vietnam-Gender-Statistics/blob/8fb36b392374a9bd16933fd8903de84d346102e3/Sex%20ratio%20at%20Birth%20by%20Region.xlsx?raw=true"
 destfile <- "dataset_birth_ratio.xlsx"
-download.file(url, destfile, mode = 'wb')
+download.file(url, destfile)
 birthDataByRegion <- read_excel(destfile)
 birthDataByRegion <- birthDataByRegion[-c(1),]
 birthDataByRegion <- slice(birthDataByRegion, -c(1))
 headers <- c('2005', '2007', '2008', '2009', '2010', '2011', '2012', '2013', '2014', '2015', '2016', '2017', '2018', '2019', '2020')
 names(birthDataByRegion)[2:ncol(birthDataByRegion)] <- unlist(mapply(function(x,y) paste(x), headers))
 names(birthDataByRegion)[1] <- "Region"
+
+url2 <- "https://github.com/lamngue/Vietnam-Gender-Statistics/blob/8e2d5472dacf5522a4069fbdca328949994b77cc/Sex%20ratio%20of%20Population%20by%20Province.xlsx?raw=true"
+destfile2 <- "dataset_sex_ratio_provice.xlsx"
+download.file(url2, destfile2)
+sexRatioByProvince <- read_excel(destfile2)
+sexRatioByProvince <- sexRatioByProvince[-c(1),]
+sexRatioByProvince <- slice(sexRatioByProvince, -c(1))
+names(sexRatioByProvince)[2:ncol(sexRatioByProvince)] <- unlist(mapply(function(x,y) paste(x), headers))
+names(sexRatioByProvince)[1] <- "Province"
+sexRatioByProvince <- sexRatioByProvince[-c(2),]
+
+sexRatioByProvince %>% 
+  mutate(Province = case_when(Province == "Ho Chi Minh city" ~ "Ho Chi Minh", Province == "Quang  Nam" ~ "Quang Nam", Province == "Quang  Ngai" ~ "Quang Ngai", Province == "Kien  Giang" ~ "Kien Giang", Province == "Ho Chi Minh city" ~ "Ho Chi Minh", Province == "Thua Thien-Hue" ~ "Thua Thien Hue",  Province == "Khanh  Hoa" ~ "Khanh Hoa", Province == "Thai  Nguyen" ~ "Thai Nguyen", Province == "Ninh  Thuan" ~ "Ninh Thuan", Province == "Binh  Duong" ~ "Binh Duong", TRUE ~ Province)) -> sexRatioByProvince
 ```
 :::
 
@@ -211,12 +226,15 @@ vn_spatial_region <- vn_spatial_region %>% mutate(Name = (case_when(Name == "Da 
 To display the map, we first get the geo-location of the provinces.
 </h5>
 ```{r}
-u <- "https://geodata.ucdavis.edu/gadm/gadm3.6/Rsp/gadm36_VNM_1_sp.rds"
-download.file(u, "vnm_geospatial.rds", mode = "wb")
-vietnam_prov <- readRDS("vnm_geospatial.rds")
-vietnam_prov_df <- vietnam_prov %>% fortify(region = "NAME_1")
-vietnam_prov_df %>% 
-  mutate(prov_names = stri_trans_general(id, "Latin-ASCII")) -> vietnam_prov_df
+# Get GADM data as SpatVector
+vietnam_prov <- gadm("Vietnam", level = 1, path = tempdir())
+
+# Convert to sf object
+vietnam_prov_sf <- sf::st_as_sf(vietnam_prov)
+
+# Add ASCII province names
+vietnam_prov_sf <- vietnam_prov_sf %>%
+  mutate(prov_names = stringi::stri_trans_general(NAME_1, "Latin-ASCII"))
 ```
 :::
 <h5>
@@ -243,7 +261,9 @@ ui = fluidPage(
     # Show a plot of the generated distribution
     mainPanel(
       plotOutput("distPlot"),
-      plotOutput("pyramidPlot")
+      plotOutput("popPlot"),
+      plotOutput("pyramidPlot"),
+      height = 10
     )
   )
 )
@@ -264,8 +284,16 @@ ui = fluidPage(
       full_join(vn_spatial_region, birthDataByRegion[c("Region", as.character(input$year))], by = c("sub_region_en" = "Region")) %>% dplyr::rename(Ratio = as.character(input$year)) %>% mutate(Ratio = as.numeric(Ratio))
     })
     
+    sex_ratio_province_map_data <- reactive({
+      full_join(vn_spatial_region, sexRatioByProvince[c("Province", as.character(input$year))], by = c("Name" = "Province")) %>% dplyr::rename(Ratio = as.character(input$year)) %>% mutate(Ratio = as.numeric(Ratio))
+    })
+    
     vietnam_birth_map_data <- reactive({
       full_join(vietnam_prov_df, birth_map_data(), by = c("prov_names" = "Name"))
+    })
+    
+    province_map_data <- reactive({
+      full_join(vietnam_prov_df, sex_ratio_province_map_data(), by = c("prov_names" = "Name"))
     })
 
     output$distPlot <- renderPlot({
@@ -274,7 +302,17 @@ ui = fluidPage(
       geom_polygon(data=vietnam_birth_map_data(), aes(fill = Ratio, x = long, y = lat, group = group), color = "grey80") +
       scale_fill_gradient(low = "grey", high = "brown") + 
       labs(title = paste("Gender ratio at Birth by region in ", as.character(input$year)),
-      subtitle = "Last updated on April 24, 2021"
+      subtitle = "Last updated on April 24, 2022"
+      )
+    })
+    
+    output$popPlot <- renderPlot({
+      ggplot() +
+      geom_sf(data = vn_spatial_region) +
+      geom_polygon(data=province_map_data(), aes(fill = Ratio, x = long, y = lat, group = group), color = "grey80") +
+      scale_fill_gradient(low = "grey", high = "blue") + 
+      labs(title = paste("Gender ratio in Population by Province in ", as.character(input$year)),
+      subtitle = "Last updated on April 24, 2022"
       )
     })
     
@@ -296,12 +334,11 @@ ui = fluidPage(
   # Create Shiny object
   shinyApp(ui = ui, server = server)
 ```
-:::
 
 ::: {#factors}
 ## Influencing factors
 <h5>
-  The skewed sex ratio in Vietnam is more prevalent in the Northern and Southern region as can be seen in the above Map. This is mainly due to Confucian beliefs, such as patriarchy, which favors males over females in family and social concerns because men are responsible for passing on the family lineage and worshiping their ancestors, among other things, are still widely prevalent (source). Furthermore, studies that investigate the magnitude of sex ratio imbalances by demographic (comparison of income level, education, literacy, and job characteristics, among other things) frequently leads to the opposite conclusion: that wealthier, urban households discriminate more than the poor. Another factor that is linked between development and raising income is fertility rates. It is difficult to associate specific causes to an imbalance sex ratio at birth, since development can actually drive gender election in both ways (source). For the six aforementioned regions, I will look into demographics and socioeconomic indicators - such as employment, income level, education, literacy levels, types of jobs, and finally the fertility rates; to see which direction(s) those factors affect the Sex Ratio at birth.
+  The skewed sex ratio in Vietnam is more prevalent in the Northern and Southern region as can be seen in the above Map. This is mainly due to Confucian beliefs, such as patriarchy, which favors males over females in family and social concerns because men are responsible for passing on the family lineage and worshiping their ancestors, among other things, are still widely prevalent (Ritchie, H., & Roser, M., 2019). Furthermore, studies that investigate the magnitude of sex ratio imbalances by demographic (comparison of income level, education, literacy, and job characteristics, among other things) frequently leads to the opposite conclusion: that wealthier, urban households discriminate more than the poor. Another factor that is linked between development and raising income is fertility rates. It is difficult to associate specific causes to an imbalance sex ratio at birth, since development can actually drive gender election in both ways (Ritchie, H., & Roser, M., 2019). For the six aforementioned regions, I will look into demographics and socioeconomic indicators - such as employment, income level, education, literacy levels, types of jobs, and finally the fertility rates; to see which direction(s) those factors affect the Sex Ratio at birth.
 </h5>
 
 :::
@@ -313,7 +350,7 @@ ui = fluidPage(
 #Processing data
 url <- "https://github.com/lamngue/Vietnam-Gender-Statistics/blob/a54c9d3f956f395c41de65f741a118933e673bde/Unemployment%20rate%20by%20Region.xlsx?raw=true"
 destfile <- "dataset_birth_ratio.xlsx"
-download.file(url, destfile, mode="wb")
+download.file(url, destfile)
 unemployment_data_by_region <- read_excel(destfile)
 unemployment_data_by_region  <- unemployment_data_by_region[-c(1,2,3),]
 unemployment_data_by_region <- unemployment_data_by_region %>% dplyr::rename("Year" = "Unemployment and underemployment rate of labour force at working age by region and by sex by Year, Region, Rate and Sex", Region = "...2", "Unemployment" = "...3")
@@ -336,7 +373,7 @@ In this analysis, I will look into the percentage of university graduates in six
 #Processing data
 url <- "https://github.com/lamngue/Vietnam-Gender-Statistics/blob/097d197fda3ae60e421350ad9495203a17addf7b/Percentage%20Of%20High%20school%20graduates.xlsx?raw=true"
 destfile <- "dataset_high_school_graduate.xlsx"
-download.file(url, destfile, mode="wb")
+download.file(url, destfile)
 university_grad_data_by_region <- read_excel(destfile)
 university_grad_data_by_region[2, 1] <- "Region"
 names(university_grad_data_by_region) <- university_grad_data_by_region[2,]
@@ -361,9 +398,9 @@ The distribution reveals that Red River Delta, Northern midlands and mountain ar
 ### Literacy levels
 ```{r fig.align = 'center'}
 #Processing data
-url <- "https://github.com/lamngue/Vietnam-Gender-Statistics/blob/3c80f45d1d7a46106fa4c01a595fd1338ada5c5f/Percentage%20of%20Literate%20Population.xlsx?raw=true"
+url <- "https://raw.githubusercontent.com/lamngue/Vietnam-Gender-Statistics/3c80f45d1d7a46106fa4c01a595fd1338ada5c5f/Percentage%20of%20Literate%20Population.xlsx"
 destfile <- "dataset_literacy.xlsx"
-download.file(url, destfile, mode="wb")
+download.file(url, destfile, mode = "wb")
 literacy_data_by_region <- read_excel(destfile)
 literacy_data_by_region[2, 1] <- "Region"
 names(literacy_data_by_region) <- literacy_data_by_region[2,]
@@ -390,9 +427,9 @@ Lastly, we will look at the fertility rates for the six regions.
 </h5>
 ```{r fig.align = 'center'}
 #Processing data
-url <- "https://github.com/lamngue/Vietnam-Gender-Statistics/blob/1d727a73b7ab8064b8564d97a46d91d498bb5e54/Fertility%20rate.xlsx?raw=true"
+url <- "https://raw.githubusercontent.com/lamngue/Vietnam-Gender-Statistics/1d727a73b7ab8064b8564d97a46d91d498bb5e54/Fertility%20rate.xlsx"
 destfile <- "dataset_fertility.xlsx"
-download.file(url, destfile, mode="wb")
+download.file(url, destfile, mode = "wb")
 fertility_data_by_region <- read_excel(destfile)
 fertility_data_by_region[2, 1] <- "Region"
 names(fertility_data_by_region) <- fertility_data_by_region[2,]
@@ -411,12 +448,12 @@ ggplot(data = fertility_data_by_region, aes(x = Region, y = `Fertility Rate`, gr
     coord_flip()
 ```
 <h5>
-  The fertility rates of South East and Red River Delta regions are among the lowest in the nation, which aligns with the preconceived notion - "In smaller families, you’re less likely to have a son by chance" (source). 
+  The fertility rates of South East and Red River Delta regions are among the lowest in the nation, which aligns with the preconceived notion - "In smaller families, you’re less likely to have a son by chance" (Tuân, V., 2020). 
 </h5>
 ```{r echo=FALSE, fig.align = 'center'}
-url <- "https://github.com/lamngue/Vietnam-Gender-Statistics/blob/main/Infant%20mortality%20Rate%20by%20Region.xlsx?raw=true"
+url <- "https://raw.githubusercontent.com/lamngue/Vietnam-Gender-Statistics/main/Infant%20mortality%20Rate%20by%20Region.xlsx"
 destfile <- "dataset_infant_mortality.xlsx"
-download.file(url, destfile, mode="wb")
+download.file(url, destfile, mode = "wb")
 infant_mortality_data_by_region <- read_excel(destfile)
 infant_mortality_data_by_region[2, 1] <- "Region"
 names(infant_mortality_data_by_region) <- infant_mortality_data_by_region[2,]
@@ -439,13 +476,7 @@ ggplot(data = infant_mortality_data_by_region, aes(x = Region, y = `Infant Morta
 ::: {#modeling}
 ## Modeling & Evaluation
 <h5>
-   Multiple linear regression, Lasso regression, Classification and Random forest are the three supervised machine learning methods I use to predict the sex ratio at birth for six regions in Vietnam. To avoid overfitting, I use stratified random sampling for each model, splitting the training dataset in half (70 percent for modeling and 30 percent for model evaluation) and selecting a sample population that best represents the whole population being investigated. The expected value of our goal variable, sex ratio at birth, is provided by each individual model. I develop a estimate for sex ratio at birth on each region using these outputs.
-</h5>
-
-<h5>
-  To build and train the model for each region, 
-
-
+   Multiple linear regression, Lasso regression, Classification and Random forest are the three supervised machine learning methods I use to predict the sex ratio at birth for six regions in Vietnam. To avoid overfitting, I use stratified random sampling for each model, splitting the training dataset in half (70 percent for modeling and 30 percent for model evaluation) and selecting a sample population that best represents the whole population being investigated. The expected value of our response variable, sex ratio at birth, is provided by each individual model. I develop a estimate for sex ratio at birth on each region using these outputs.
 </h5>
 ### Creating dataset and correlation plot
 ```{r fig.align = 'center'}
@@ -470,7 +501,7 @@ northern_sub <- vietnam_overall %>%
 corrplot(cor(northern_sub), method="number")
 ``` 
 <h5>
-From the matrix, the smallest correlation is 0.33, also some variables seem to have a weak, positive, linear relationship with the graduation rate. All correlations between the explanatory variables are smaller than 0.7. Therefore, we can conclude that there’s no multicollinearity issue in this model.
+From the matrix, the smallest correlation is 0.12, also some variables seem to have a weak, positive, linear relationship with the graduation rate. All correlations between the explanatory variables are smaller than 0.8. Therefore, we can conclude that there’s no multicollinearity issue in this model.
 </h5>
 
 
@@ -493,10 +524,13 @@ eval_results <- function(actual, predicted, df) {
                   SSE <- sum((predicted - actual)^2)
                   SST <- sum((actual - mean(actual))^2)
                   R_square <- 1 - (SSE / SST)
+                  MSE <- mse(actual, predicted)
+                  MAPE <- MAPE(predicted, actual)
                   data.frame(
-                    MSE = mse(actual, predicted),
+                    MSE = MSE,
                     Rsquare = R_square,
-                    MAE = MAE(predicted, actual)
+                    MAE = MAE(predicted, actual),
+                    MAPE = MAPE
                   )
                 }
 ```
@@ -550,7 +584,7 @@ In five-cross fold validations, I found the optimal lambda value for the penaliz
 Random forest model is generated by bootstrapping the given dataset (training_set) and make a decision tree by selecting a subset random variables. Here, the forest is built from 500 trees and 1 random variable,  selected from Unemployment Rate, Graduation Rate, Literacy Rate and Fertility Rate.
 </h5>
 ```{r fig.align = 'center'}
-#rename the trainingset
+#rename the training set
 names(training_set) <- make.names(names(training_set))
 names(testing_set) <- make.names(names(testing_set))
 # Using random forest to rank variables according to their importance
@@ -586,7 +620,7 @@ eval_results(testing_set$`Ratio.at.Birth`, predictions_rf_test, testing_set)
   Before applying the chosen data modeling techniques, it is critical to analyze their findings. I evaluate my predictive models using the following three criteria:
   1. Mean Square Error (MSE)
   2. $R^2$/ Out-of-sample $R^2$ (Test data)
-  3. Mean Absolute Error (MAE)
+  and 3. Mean Absolute Error (MAE)
 </h5>
 <h5>
   $R^2$ (coefficient of Determination) measures the proportions of the dependent variable's variability that can be explained by the independent variable(s). From the calculations above, random forest performs the best with an in-sample (training set) $R^2$ of 0.784 and an out-of-sample (testing set) $R^2$ of 0.289.
@@ -599,16 +633,16 @@ eval_results(testing_set$`Ratio.at.Birth`, predictions_rf_test, testing_set)
   
   As in the "Influencing factors" section, those variables chosen for the model are based on an establishment of correlation between sex ratio at birth and development factors. However, the imbalance in sex ratio can be most accurately explained by a high level of patrilineality - that is, passing down the father's generation, where the responsibilities lie in the male child. These are due to a few economic and social benefits, such as the male child will help carry down family name, support aging parents or bring valuable contributions to the workforce.
 </h5>
-```{r fig.align='center'}
+```{r fig.align= 'center'}
 #Birth ratio by infant mortality
 vietnam_overall <- merge(vietnam_overall, infant_mortality_data_by_region)
 vietnam_overall %>% ggplot(mapping = aes(x = `Infant Mortality Rate`, y = `Ratio at Birth`, color = `Infant Mortality Rate`)) + geom_point(alpha = 1) + scale_colour_gradientn(colors=rainbow(4), trans="reverse") + xlab("Infant Mortality Rate") + ylab ("Ratio at Birth") + ggtitle("Sex ratio at Birth based on Infant Mortality Rate") + geom_smooth(method = "lm")
 ```
 <h5>
-  An additional factor that could potentially predict the sex ratio at birth is the infant mortality rate. There is a slight negative relationship, meaning that the higher the mortality rate, the less skewed the sex ratio towards male babies. Prediction accuracy is critical in the context of the data and model, but companies must look at the model beyond the statistics and include qualitative elements. For instance, for families with a strong preference for a boy, they should consider their community's infant mortality rate, since mortality is more common among boys in all countries in the world since they are at higher risk of birth complications, and infectious disease. (source). Therefore, the "disappointment" of not having a male child will likely be less serious in regions with a high mortality rate.
+  An additional factor that could potentially predict the sex ratio at birth is the infant mortality rate. There is a slight negative relationship, meaning that the higher the mortality rate, the less skewed the sex ratio towards male babies. Prediction accuracy is critical in the context of the data and model, but companies must look at the model beyond the statistics and include qualitative elements. For instance, for families with a strong preference for a boy, they should consider their community's infant mortality rate, since mortality is more common among boys in all countries in the world since they are at higher risk of birth complications, and infectious disease. (Ritchie, H., & Roser, M., 2019). Therefore, the "disappointment" of not having a male child will likely be less serious in regions with a high mortality rate.
 </h5>
 <h5>
-  From the above three models, the random forest is the most versatile, meaning that there is very little pre-processing required and the data does not need to be rescaled or transformed. Additionally, the model has moderate bias, low variance, and is robust to outliers and non-linear data. Needless to say, besides these advantages in utilizing random forest, there are several drawbacks that policy makers should be aware of regarding implementation. Firstly, the random forest model is not easily interpretable. It is a predictive modeling tool and not a descriptive tool, meaning if policy makers are looking for a description of the relationships in the sex ratio at birth data, other approaches would be better. Secondly, random forest can't extrapolate, it can only make a prediction that is an average of previously observed labels. For instance, if there are operational disruptions caused by natural disasters or pandemics that affect a significant portion of the population, the random forest model will not make accurate predictions. Policy makers can mitigate these limitations by using the random forest model as a part of ensemble learning.
+  From the above three models, the random forest is the most versatile, meaning that there is very little pre-processing required and the data does not need to be rescaled or transformed. Additionally, the model has moderate bias, low variance, and is robust to outliers and non-linear data. Needless to say, besides these advantages in utilizing random forest, there are several drawbacks that firms should be aware of regarding deployment. Firstly, the random forest model is not easily interpretable. It is a predictive modeling tool and not a descriptive tool, meaning if policy makers are looking for a description of the relationships in the sex ratio at birth data, other approaches would be better. Secondly, random forest can't extrapolate, it can only make a prediction that is an average of previously observed labels. For instance, if there are operational disruptions caused by natural disasters or pandemics that affect a significant portion of the population, the random forest model will not make accurate predictions. Policy makers can mitigate these limitations by using the random forest model as a part of ensemble learning.
 </h5>
 :::
 
@@ -621,4 +655,12 @@ vietnam_overall %>% ggplot(mapping = aes(x = `Infant Mortality Rate`, y = `Ratio
   By utilizing the information that is available ahead of time, policy makers can forecast the sex ratio at birth in Vietnam thus mitigate multiple consequences of having excess male child. Specifically, they can reform the job market - by digital transformation of databases and improvement of eligible workforce, increase education's accessibility in regions with lower literacy rate, and implement policies to stabilize the fertility rates in regions where the ratio is heavily skewed. Being able to predict the ratio ahead of time will mitigate the aforementioned consequences.
 </h5>
 :::
+
+::: {#references}
+## References
+<h5>
+Ritchie, H., & Roser, M. (2019, June 13). Gender ratio. Our World in Data. Retrieved June 27, 2022, from https://ourworldindata.org/gender-ratio 
+
+Tuân, V. (2020, December 18). Việt Nam dư thừa 1,5 triệu nam giới vào năm 2034. vnexpress.net. Retrieved June 27, 2022, from https://vnexpress.net/viet-nam-du-thua-1-5-trieu-nam-gioi-vao-nam-2034-4208224.html
+</h5>
 </body>
