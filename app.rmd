@@ -12,32 +12,27 @@ runtime: shiny
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+options(repos = c(CRAN = "https://cloud.r-project.org"))
 ```
 
 ```{r include = FALSE}
 library(shiny)
-library(raster)
 library(shinythemes)
-library(caret)
 library(readxl)
 library(geodata)
-library(tidyverse)
-library(rvest)
-library(ggplot2)
-library(rgeos)
-library(maptools)
-library(stringi)
 library(Metrics)
-library(dplyr)
+library(tidyverse)      # includes ggplot2, dplyr, stringr, etc.
+library(rvest)
 library(viridis)
+library(stringi)
 library(XML)
+library(caret)
 library(glmnet)
 library(corrplot)
 library(MLmetrics)
 library(reshape2)
 library(randomForest)
 library(glue)
-library(plyr)
 ```
 
 <head>
@@ -227,7 +222,7 @@ To display the map, we first get the geo-location of the provinces.
 </h5>
 ```{r}
 # Get GADM data as SpatVector
-vietnam_prov <- gadm("Vietnam", level = 1, path = tempdir())
+vietnam_prov <- geodata::gadm("Vietnam", level = 1, path = tempdir())
 
 # Convert to sf object
 vietnam_prov_sf <- sf::st_as_sf(vietnam_prov)
